@@ -3,6 +3,7 @@ import random
 import statistics
 import time
 
+
 class ServiceStation: 
     def __init__(self, env, num_servers, mean_service_time):
         self.env = env
@@ -93,13 +94,15 @@ class BuffetSimulation:
         self.customer_total_times.append(total_time)
         self.completed_customers += 1
     
-    def run_simulation(self, until_time, mean_arrival_time, station_configs, requeue_prob):
+    def run_simulation(self, until_time, mean_arrival_time, station_configs, requeue_prob, arrival_rate):
         self.setup_stations(station_configs)
         
         self.env.process(self.generate_arrivals(mean_arrival_time, station_configs, requeue_prob))
         
+
         print(f"=== Running Simulation for {until_time} minutes ===")
-        print(f"Arrival rate: 1 customer every {mean_arrival_time:.2f} minutes")
+        print(f"λ = {arrival_rate} customers/min")
+        print(f"Arrival interval = 1 / λ = {mean_arrival_time:.2f} minutes")
         print(f"Re-queue probability: {requeue_prob * 100:.1f}%\n")
         
         start_real_time = time.time()
@@ -111,7 +114,6 @@ class BuffetSimulation:
         self.print_results()
     
     def print_results(self):
-        """Prints comprehensive performance metrics for the simulation."""
         print("=" * 70)
         print("SIMULATION RESULTS")
         print("=" * 70)
@@ -135,8 +137,7 @@ class BuffetSimulation:
         print("=" * 70)
         
         for name, station in self.stations.items():
-            station_display_name = self.station_names.get(name, name)
-            print(f"\n--- {station_display_name} ---")
+            print(f"\n--- {name} ---")
             print(f"Servers: {station.num_servers}")
             print(f"Customers served: {station.customers_served}")
             
@@ -165,79 +166,70 @@ class BuffetSimulation:
                 total_service_time = sum(station.service_times)
                 utilization = (total_service_time / (self.env.now * station.num_servers)) * 100
                 print(f"Server utilization: {utilization:.2f}%")
-        
-        print(f"\n{'=' * 70}\n")
 
 
-def get_workload_1_config():
+WORKLOAD1_ARRIVAL_RATE = 1.0    #  1 customer per minute
+WORKLOAD2_ARRIVAL_RATE = 5.0    #  5 customers per minute
+
+
+def input_station_config(station_name):
+    print(f"\n--- Enter config for station: {station_name} ---")
+    num_servers = int(input(f"Number of servers for {station_name}: "))
+    mean_service_time = float(input(f"Mean service time for {station_name} (minutes): "))
+    return {"name": station_name, "num_servers": num_servers, "mean_service_time": mean_service_time}
+
+
+def input_workload(name):
+    print("\n" + "=" * 70)
+    print(f"Config for {name}")
+    print("=" * 70)
+
+    requeue_prob = float(input("Requeue probability (0-1): "))
+
+    station_list = ["waiting", "appetizer", "main_course", "dessert", "dining"]
+    station_configs = [input_station_config(s) for s in station_list]
+
     return {
-        'name': 'Workload 1: Off-peak Hours',
-        'mean_arrival_time': 1.0,
-        'requeue_prob': 0.2,
-        'station_configs': [
-            {'name': 'waiting', 'num_servers': 2, 'mean_service_time': 0.5},
-            {'name': 'appetizer', 'num_servers': 3, 'mean_service_time': 1.0},
-            {'name': 'main_course', 'num_servers': 3, 'mean_service_time': 1.5},
-            {'name': 'dessert', 'num_servers': 2, 'mean_service_time': 0.8},
-            {'name': 'dining', 'num_servers': 20, 'mean_service_time': 15.0}
-        ]
+        "name": name,
+        "requeue_prob": requeue_prob,
+        "station_configs": station_configs
     }
 
-def get_workload_2_config():
-    return {
-        'name': 'Workload 2: Peak Hours',
-        'mean_arrival_time': 0.2,
-        'requeue_prob': 0.15,
-        'station_configs': [
-            {'name': 'waiting', 'num_servers': 4, 'mean_service_time': 0.5},
-            {'name': 'appetizer', 'num_servers': 5, 'mean_service_time': 1.0},
-            {'name': 'main_course', 'num_servers': 5, 'mean_service_time': 1.5},
-            {'name': 'dessert', 'num_servers': 4, 'mean_service_time': 0.8},
-            {'name': 'dining', 'num_servers': 40, 'mean_service_time': 15.0}
-        ]
-    }
 
 
 if __name__ == "__main__":
     random.seed(42)
-    
-    SIM_TIME = 480
-    
-    print("\n" + "=" * 70)
-    print("BUFFET QUEUING SYSTEM SIMULATION")
-    print("Self-service buffet system at multiple food counters")
-    print("=" * 70 + "\n")
-    
+
+    SIM_TIME = float(input("Enter SIMULATION TIME (minutes): "))
+
     print("\n" + "#" * 70)
-    print("# WORKLOAD 1: OFF-PEAK HOURS")
-    print("#" * 70 + "\n")
-    
-    workload1 = get_workload_1_config()
+    print("# WORKLOAD 1 with λ =", WORKLOAD1_ARRIVAL_RATE)
+    print("#" * 70)
+    workload1 = input_workload("Workload 1: Off-peak Hours")
+
     sim1 = BuffetSimulation()
     sim1.run_simulation(
         until_time=SIM_TIME,
-        mean_arrival_time=workload1['mean_arrival_time'],
+        mean_arrival_time= 1 / WORKLOAD1_ARRIVAL_RATE,
         station_configs=workload1['station_configs'],
-        requeue_prob=workload1['requeue_prob']
+        requeue_prob=workload1['requeue_prob'],
+        arrival_rate=WORKLOAD1_ARRIVAL_RATE
     )
-    
-    print("\n" + "=" * 70)
-    input("Press Enter to continue to Workload 2...")
-    print("=" * 70 + "\n")
-    
+
+    input("\nPress Enter to continue to WORKLOAD 2...\n")
+
     print("\n" + "#" * 70)
-    print("# WORKLOAD 2: PEAK HOURS")
-    print("#" * 70 + "\n")
-    
-    workload2 = get_workload_2_config()
+    print("# WORKLOAD 2 with λ =", WORKLOAD2_ARRIVAL_RATE)
+    print("#" * 70)
+    workload2 = input_workload("Workload 2: Peak Hours")
+
     sim2 = BuffetSimulation()
     sim2.run_simulation(
         until_time=SIM_TIME,
-        mean_arrival_time=workload2['mean_arrival_time'],
+        mean_arrival_time= 1 / WORKLOAD2_ARRIVAL_RATE,
         station_configs=workload2['station_configs'],
-        requeue_prob=workload2['requeue_prob']
+        requeue_prob=workload2['requeue_prob'],
+        arrival_rate=WORKLOAD2_ARRIVAL_RATE
     )
-    
-    print("\n" + "=" * 70)
-    print("SIMULATION COMPLETE - All workloads tested")
-    print("=" * 70 + "\n")
+
+    print("\nSimulation completed for all workloads!\n")
