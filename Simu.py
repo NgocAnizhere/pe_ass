@@ -4,66 +4,63 @@ import statistics
 import time
 
 
-class ServiceStation: 
+class ServiceStation:
+    """
+    Implements M/M/c queueing model:
+    - Single shared queue
+    - c servers (capacity)
+    - Customers wait in one line and are served by the next available server
+    - This allows for proper mathematical verification using Erlang-C formulas
+    """
     def __init__(self, env, num_servers, mean_service_time, queue_capacity=float('inf')):
         self.env = env
         self.num_servers = num_servers
         self.mean_service_time = mean_service_time
         self.queue_capacity = queue_capacity
         
-        # Create individual resources for each server (each with its own queue)
-        self.servers = [simpy.Resource(env, capacity=1) for _ in range(num_servers)]
+        # Single shared queue feeding c servers (M/M/c model)
+        self.resource = simpy.Resource(env, capacity=num_servers)
         
         self.wait_times = []
         self.service_times = []
         self.queue_lengths = []
         self.customers_served = 0
         
-        # Track statistics per server
-        self.server_queue_lengths = [[] for _ in range(num_servers)]
+        # Track which server served each customer (for statistics)
         self.server_customers_served = [0 for _ in range(num_servers)]
+        self.next_server = 0  # Round-robin assignment for tracking
     
     def has_available_queue(self):
-        """Check if any queue has space available"""
-        for server in self.servers:
-            if len(server.queue) < self.queue_capacity:
-                return True
-        return False
+        """Check if queue has space available"""
+        # In M/M/c model, check if total queue length is below capacity
+        return len(self.resource.queue) < self.queue_capacity
     
-    def get_shortest_queue_server(self):
-        """Get the server with the shortest queue that has space"""
-        available_servers = [(i, server) for i, server in enumerate(self.servers) 
-                            if len(server.queue) < self.queue_capacity]
-        if not available_servers:
-            return None
-        # Return server with minimum queue length
-        return min(available_servers, key=lambda x: len(x[1].queue))[1]
+    def get_current_queue_length(self):
+        """Get current queue length (customers waiting, not being served)"""
+        return len(self.resource.queue)
     
-    def get_current_queue_status(self):
-        """Get current queue length for each server"""
-        return [len(server.queue) for server in self.servers]
+    def get_current_in_service(self):
+        """Get number of customers currently being served"""
+        return self.resource.count
         
     def serve(self, customer_id):
         arrival_time = self.env.now
         
-        # Get the server with shortest available queue
-        server = self.get_shortest_queue_server()
-        if server is None:
-            # Should not happen if called correctly, but handle gracefully
-            return
-        
-        # Find server index
-        server_index = self.servers.index(server)
-        
-        queue_length = len(server.queue)
+        # Record queue length when customer arrives
+        queue_length = len(self.resource.queue)
         self.queue_lengths.append(queue_length)
-        self.server_queue_lengths[server_index].append(queue_length)
         
-        with server.request() as request:
+        # Request service from the shared resource pool
+        with self.resource.request() as request:
             yield request
             
+            # Customer got a server
             wait_time = self.env.now - arrival_time
             self.wait_times.append(wait_time)
+            
+            # Assign to server (round-robin for tracking purposes)
+            server_index = self.next_server
+            self.next_server = (self.next_server + 1) % self.num_servers
             
             service_time = random.expovariate(1.0 / self.mean_service_time)
             self.service_times.append(service_time)
@@ -101,15 +98,17 @@ class BuffetSimulation:
                 queue_capacity
             )
             self.stations[config['name']] = station
-            capacity_str = f"queue capacity = {queue_capacity}" if queue_capacity != float('inf') else "unlimited queue"
+            if queue_capacity != float('inf'):
+                capacity_str = f"total queue capacity = {queue_capacity}, total capacity (queue + servers) = {queue_capacity + config['num_servers']}"
+            else:
+                capacity_str = "unlimited queue"
             print(f"Station '{config['name']}': {config['num_servers']} servers, "
                   f"service time = {config['mean_service_time']:.2f} min, {capacity_str}")
         print()
     
     def get_total_waiting_queue_length(self):
-        """Get total number of customers in waiting station queues"""
-        total = sum(len(server.queue) for server in self.stations['waiting'].servers)
-        return total
+        """Get total number of customers in waiting station queue"""
+        return len(self.stations['waiting'].resource.queue)
     
     def get_total_service_station_customers(self):
         """Get total customers in appetizer, main_course, and dessert stations"""
@@ -117,14 +116,17 @@ class BuffetSimulation:
         for station_name in ['appetizer', 'main_course', 'dessert']:
             # Count customers in queue + being served
             station = self.stations[station_name]
-            for server in station.servers:
-                total += len(server.queue) + server.count  # count = number being served
+            total += len(station.resource.queue) + station.resource.count
         return total
     
     def get_dining_total_capacity(self):
-        """Get total capacity of dining station (servers * queue_capacity)"""
+        """Get total capacity of dining station (queue + servers)"""
         station = self.stations['dining']
-        return station.num_servers * station.queue_capacity
+        # Total capacity = customers in queue + customers being served
+        # In M/M/c: max queue size + number of servers
+        if station.queue_capacity == float('inf'):
+            return float('inf')
+        return station.queue_capacity + station.num_servers
     
     def generate_service_requirement(self):
         """Generate service requirement in n/n/n format for appetizer/main_course/dessert"""
@@ -342,22 +344,18 @@ class BuffetSimulation:
             print(f"Average queue length: {avg_queue:.2f}")
             print(f"Max queue length: {max_queue}")
             
-            # PER-SERVER STATISTICS
-            print(f"\n  Per-Server Breakdown:")
+            # PER-SERVER STATISTICS (M/M/c model - servers share one queue)
+            print(f"\n  Per-Server Breakdown (approximate distribution):")
             for i in range(station.num_servers):
                 print(f"    Server {i+1}:")
                 print(f"      Customers served: {station.server_customers_served[i]}")
-                if station.server_queue_lengths[i]:
-                    avg_server_queue = statistics.mean(station.server_queue_lengths[i])
-                    max_server_queue = max(station.server_queue_lengths[i])
-                    print(f"      Average queue length: {avg_server_queue:.2f}")
-                    print(f"      Max queue length: {max_server_queue}")
-                else:
-                    print(f"      Average queue length: 0.00")
-                    print(f"      Max queue length: 0")
-                # Current queue at end of simulation
-                current_queue = len(station.servers[i].queue)
-                print(f"      Current queue (end of sim): {current_queue}")
+            
+            # Current queue status
+            current_queue = len(station.resource.queue)
+            current_in_service = station.resource.count
+            print(f"\n  Current status (end of sim):")
+            print(f"    Customers in queue: {current_queue}")
+            print(f"    Customers being served: {current_in_service}")
 
             # UTILIZATION
             if station.service_times:
@@ -380,7 +378,7 @@ def input_station_config(station_name):
     print(f"\n--- Enter config for station: {station_name} ---")
     num_servers = int(input(f"Number of servers for {station_name}: "))
     mean_service_time = float(input(f"Mean service time for {station_name} (minutes): "))
-    queue_capacity_input = input(f"Queue capacity per server for {station_name} (press Enter for unlimited): ").strip()
+    queue_capacity_input = input(f"Total queue capacity for {station_name} (press Enter for unlimited): ").strip()
     queue_capacity = float('inf') if queue_capacity_input == "" else int(queue_capacity_input)
     return {"name": station_name, "num_servers": num_servers, "mean_service_time": mean_service_time, "queue_capacity": queue_capacity}
 
