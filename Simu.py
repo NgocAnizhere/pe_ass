@@ -5,23 +5,61 @@ import time
 
 
 class ServiceStation: 
-    def __init__(self, env, num_servers, mean_service_time):
+    def __init__(self, env, num_servers, mean_service_time, queue_capacity=float('inf')):
         self.env = env
         self.num_servers = num_servers
         self.mean_service_time = mean_service_time
-        self.resource = simpy.Resource(env, capacity=num_servers)
+        self.queue_capacity = queue_capacity
+        
+        # Create individual resources for each server (each with its own queue)
+        self.servers = [simpy.Resource(env, capacity=1) for _ in range(num_servers)]
         
         self.wait_times = []
         self.service_times = []
         self.queue_lengths = []
         self.customers_served = 0
         
+        # Track statistics per server
+        self.server_queue_lengths = [[] for _ in range(num_servers)]
+        self.server_customers_served = [0 for _ in range(num_servers)]
+    
+    def has_available_queue(self):
+        """Check if any queue has space available"""
+        for server in self.servers:
+            if len(server.queue) < self.queue_capacity:
+                return True
+        return False
+    
+    def get_shortest_queue_server(self):
+        """Get the server with the shortest queue that has space"""
+        available_servers = [(i, server) for i, server in enumerate(self.servers) 
+                            if len(server.queue) < self.queue_capacity]
+        if not available_servers:
+            return None
+        # Return server with minimum queue length
+        return min(available_servers, key=lambda x: len(x[1].queue))[1]
+    
+    def get_current_queue_status(self):
+        """Get current queue length for each server"""
+        return [len(server.queue) for server in self.servers]
+        
     def serve(self, customer_id):
         arrival_time = self.env.now
-        queue_length = len(self.resource.queue)
-        self.queue_lengths.append(queue_length)
         
-        with self.resource.request() as request:
+        # Get the server with shortest available queue
+        server = self.get_shortest_queue_server()
+        if server is None:
+            # Should not happen if called correctly, but handle gracefully
+            return
+        
+        # Find server index
+        server_index = self.servers.index(server)
+        
+        queue_length = len(server.queue)
+        self.queue_lengths.append(queue_length)
+        self.server_queue_lengths[server_index].append(queue_length)
+        
+        with server.request() as request:
             yield request
             
             wait_time = self.env.now - arrival_time
@@ -33,6 +71,7 @@ class ServiceStation:
             yield self.env.timeout(service_time)
             
             self.customers_served += 1
+            self.server_customers_served[server_index] += 1
 
 
 class BuffetSimulation:
@@ -44,18 +83,36 @@ class BuffetSimulation:
         self.completed_customers = 0
         self.requeue_count = 0
         self.customer_total_times = []
+        self.waiting_area = []  # Queue for customers waiting to enter stations
+        self.unmet_demand_returns = 0  # Count customers returning due to unmet demands
+        self.customers_completed_dining = set()  # Track unique customers who finished dining
 
     def setup_stations(self, station_configs):
         for config in station_configs:
+            queue_capacity = config.get('queue_capacity', float('inf'))
             station = ServiceStation(
                 self.env,
                 config['num_servers'],
-                config['mean_service_time']
+                config['mean_service_time'],
+                queue_capacity
             )
             self.stations[config['name']] = station
+            capacity_str = f"queue capacity = {queue_capacity}" if queue_capacity != float('inf') else "unlimited queue"
             print(f"Station '{config['name']}': {config['num_servers']} servers, "
-                  f"service time = {config['mean_service_time']:.2f} min")
+                  f"service time = {config['mean_service_time']:.2f} min, {capacity_str}")
         print()
+    
+    def generate_service_requirement(self):
+        """Generate service requirement in n/n/n format for appetizer/main_course/dessert"""
+        while True:
+            req = [
+                random.choice([0, 1]),  # Appetizer
+                random.choice([0, 1]),  # Main course
+                random.choice([0, 1])   # Dessert
+            ]
+            # Ensure at least one station is required (not 0/0/0)
+            if sum(req) > 0:
+                return req
     
     def generate_arrivals(self, mean_arrival_time, requeue_prob):
         while True:
@@ -64,28 +121,77 @@ class BuffetSimulation:
             self.customer_count += 1
             self.total_customers += 1
             customer_id = f"Customer_{self.customer_count}"
+            service_req = self.generate_service_requirement()
             
-            self.env.process(self.customer_process(customer_id, requeue_prob))
+            self.env.process(self.customer_process(customer_id, requeue_prob, service_req))
 
-    def customer_process(self, customer_id, requeue_prob):
+    def customer_process(self, customer_id, requeue_prob, service_req, is_requeue=False):
         start_time = self.env.now
         
-        # first station
+        # Create a mutable copy of service requirements to track fulfillment
+        current_demands = service_req.copy()
+        
+        # Customer enters waiting area first
+        if is_requeue:
+            # Requeued customers go to the front
+            self.waiting_area.insert(0, (customer_id, current_demands, start_time))
+        else:
+            self.waiting_area.append((customer_id, current_demands, start_time))
+        
+        # Process through waiting station
         yield self.env.process(self.stations['waiting'].serve(customer_id))
         
-        while True:
-            yield self.env.process(self.stations['appetizer'].serve(customer_id))
-            yield self.env.process(self.stations['main_course'].serve(customer_id))
-            yield self.env.process(self.stations['dessert'].serve(customer_id))
-            yield self.env.process(self.stations['dining'].serve(customer_id))
-            
-            if random.random() < requeue_prob:
-                self.requeue_count += 1
-                continue
-            break
+        # Define station order: appetizer -> main_course -> dessert
+        station_order = ['appetizer', 'main_course', 'dessert']
         
-        self.customer_total_times.append(self.env.now - start_time)
-        self.completed_customers += 1
+        # Keep trying to fulfill demands until all are met
+        while sum(current_demands) > 0:  # While there are unmet demands
+            demand_met_this_round = False
+            
+            # Check each station in order
+            for i, station_name in enumerate(station_order):
+                if current_demands[i] == 1:  # Customer needs this station
+                    # Check if station has available queue space
+                    if self.stations[station_name].has_available_queue():
+                        # Proceed to station and get service
+                        yield self.env.process(self.stations[station_name].serve(customer_id))
+                        # Mark this demand as fulfilled
+                        current_demands[i] = 0
+                        demand_met_this_round = True
+                    # If queue is full, skip to next station
+            
+            # If no demands were met this round, customer goes back to waiting
+            if not demand_met_this_round and sum(current_demands) > 0:
+                # Customer returns to waiting area (back of queue)
+                self.waiting_area.append((customer_id, current_demands, start_time))
+                yield self.env.process(self.stations['waiting'].serve(customer_id))
+        
+        # All food station demands are met, now go to dining station
+        while not self.stations['dining'].has_available_queue():
+            yield self.env.timeout(0.1)  # Wait for space
+        
+        yield self.env.process(self.stations['dining'].serve(customer_id))
+        
+        # Track unique customer who completed dining (extract base ID without _requeue suffix)
+        base_customer_id = customer_id.split('_requeue')[0].split('_unmet')[0]
+        self.customers_completed_dining.add(base_customer_id)
+        
+        # After dining, check if there are still unmet demands (shouldn't happen, but check)
+        if sum(current_demands) > 0:
+            # Customer has unmet demands, return to waiting queue
+            self.unmet_demand_returns += 1
+            self.waiting_area.append((customer_id, current_demands, start_time))
+            yield self.env.process(self.customer_process(customer_id + "_unmet", requeue_prob, current_demands, is_requeue=False))
+        # Check requeue probability for getting more food
+        elif random.random() < requeue_prob:
+            self.requeue_count += 1
+            # Generate new service requirement for requeue
+            new_service_req = self.generate_service_requirement()
+            self.env.process(self.customer_process(customer_id + "_requeue", requeue_prob, new_service_req, is_requeue=True))
+        else:
+            # Customer leaves the system
+            self.customer_total_times.append(self.env.now - start_time)
+            self.completed_customers += 1
     
     def run_simulation(self, until_time, mean_arrival_time, requeue_prob, arrival_rate, station_configs):
         self.setup_stations(station_configs)
@@ -114,7 +220,10 @@ class BuffetSimulation:
         print(f"Total customers arrived: {self.total_customers}")
         print(f"Customers completed: {self.completed_customers}")
         print(f"Customers still in system: {self.total_customers - self.completed_customers}")
-        print(f"Re-queue events: {self.requeue_count}")
+        print(f"Unique customers who completed dining: {len(self.customers_completed_dining)}")
+        print(f"Re-queue events (after dining): {self.requeue_count}")
+        print(f"Number of customers who requeued: {self.requeue_count}")
+        print(f"Returns to waiting (unmet demands): {self.unmet_demand_returns}")
         
         if self.customer_total_times:
             avg_total_time = statistics.mean(self.customer_total_times)
@@ -143,11 +252,28 @@ class BuffetSimulation:
             avg_service = statistics.mean(station.service_times) if station.service_times else 0
             print(f"Average service time: {avg_service:.2f} minutes")
 
-            # QUEUE LENGTH
+            # QUEUE LENGTH (Overall)
             avg_queue = statistics.mean(station.queue_lengths) if station.queue_lengths else 0
             max_queue = max(station.queue_lengths) if station.queue_lengths else 0
             print(f"Average queue length: {avg_queue:.2f}")
             print(f"Max queue length: {max_queue}")
+            
+            # PER-SERVER STATISTICS
+            print(f"\n  Per-Server Breakdown:")
+            for i in range(station.num_servers):
+                print(f"    Server {i+1}:")
+                print(f"      Customers served: {station.server_customers_served[i]}")
+                if station.server_queue_lengths[i]:
+                    avg_server_queue = statistics.mean(station.server_queue_lengths[i])
+                    max_server_queue = max(station.server_queue_lengths[i])
+                    print(f"      Average queue length: {avg_server_queue:.2f}")
+                    print(f"      Max queue length: {max_server_queue}")
+                else:
+                    print(f"      Average queue length: 0.00")
+                    print(f"      Max queue length: 0")
+                # Current queue at end of simulation
+                current_queue = len(station.servers[i].queue)
+                print(f"      Current queue (end of sim): {current_queue}")
 
             # UTILIZATION
             if station.service_times:
@@ -155,7 +281,7 @@ class BuffetSimulation:
                 utilization = (total_service_time / (self.env.now * station.num_servers)) * 100
             else:
                 utilization = 0
-            print(f"Server utilization: {utilization:.2f}%")
+            print(f"\nServer utilization: {utilization:.2f}%")
 
 
 # -------------------------------------------
@@ -170,7 +296,9 @@ def input_station_config(station_name):
     print(f"\n--- Enter config for station: {station_name} ---")
     num_servers = int(input(f"Number of servers for {station_name}: "))
     mean_service_time = float(input(f"Mean service time for {station_name} (minutes): "))
-    return {"name": station_name, "num_servers": num_servers, "mean_service_time": mean_service_time}
+    queue_capacity_input = input(f"Queue capacity per server for {station_name} (press Enter for unlimited): ").strip()
+    queue_capacity = float('inf') if queue_capacity_input == "" else int(queue_capacity_input)
+    return {"name": station_name, "num_servers": num_servers, "mean_service_time": mean_service_time, "queue_capacity": queue_capacity}
 
 
 def input_station_config_once():
