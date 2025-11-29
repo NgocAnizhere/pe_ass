@@ -89,6 +89,7 @@ class BuffetSimulation:
         self.customers_left_full_queue = 0  # Customers who left because waiting queue was full
         self.customers_left_excessive_wait = 0  # Customers who left after waiting > 20 minutes
         self.customers_in_service_stations = 0  # Track customers currently in service stations (not waiting/dining)
+        self.customers_denied_requeue = 0  # Customers who left because they exceeded max time for requeue
 
     def setup_stations(self, station_configs):
         for config in station_configs:
@@ -240,6 +241,9 @@ class BuffetSimulation:
         base_customer_id = customer_id.split('_requeue')[0].split('_unmet')[0]
         self.customers_completed_dining.add(base_customer_id)
         
+        # Calculate total time in system so far
+        time_in_system = self.env.now - start_time
+        
         # After dining, check if there are still unmet demands (shouldn't happen, but check)
         if sum(current_demands) > 0:
             # Customer has unmet demands, return to waiting queue
@@ -248,24 +252,34 @@ class BuffetSimulation:
             yield self.env.process(self.customer_process(customer_id + "_unmet", requeue_prob, current_demands, is_requeue=False))
         # Check requeue probability for getting more food
         elif random.random() < requeue_prob:
-            self.requeue_count += 1
-            # Generate new service requirement for requeue
-            new_service_req = self.generate_service_requirement()
-            self.env.process(self.customer_process(customer_id + "_requeue", requeue_prob, new_service_req, is_requeue=True))
+            # Check if customer's total time exceeds the max requeue time limit
+            if time_in_system > self.max_time_for_requeue:
+                # Customer exceeded time limit, not allowed to requeue, must leave
+                self.customers_denied_requeue += 1
+                self.customer_total_times.append(time_in_system)
+                self.completed_customers += 1
+            else:
+                # Customer is within time limit, allow requeue
+                self.requeue_count += 1
+                # Generate new service requirement for requeue
+                new_service_req = self.generate_service_requirement()
+                self.env.process(self.customer_process(customer_id + "_requeue", requeue_prob, new_service_req, is_requeue=True))
         else:
             # Customer leaves the system
-            self.customer_total_times.append(self.env.now - start_time)
+            self.customer_total_times.append(time_in_system)
             self.completed_customers += 1
     
-    def run_simulation(self, until_time, mean_arrival_time, requeue_prob, arrival_rate, station_configs):
+    def run_simulation(self, until_time, mean_arrival_time, requeue_prob, arrival_rate, station_configs, max_time_for_requeue):
         self.setup_stations(station_configs)
+        self.max_time_for_requeue = max_time_for_requeue
         
         self.env.process(self.generate_arrivals(mean_arrival_time, requeue_prob))
         
         print(f"=== Running Simulation for {until_time} minutes ===")
         print(f"λ = {arrival_rate} customers/min")
         print(f"Arrival interval = 1 / λ = {mean_arrival_time:.2f} minutes")
-        print(f"Re-queue probability: {requeue_prob * 100:.1f}%\n")
+        print(f"Re-queue probability: {requeue_prob * 100:.1f}%")
+        print(f"Max time for requeue eligibility: {max_time_for_requeue:.2f} minutes\n")
         
         start_real_time = time.time()
         self.env.run(until=until_time)
@@ -292,6 +306,7 @@ class BuffetSimulation:
         print(f"\n--- Customers Who Left ---")
         print(f"Left because waiting queue was full: {self.customers_left_full_queue}")
         print(f"Left because of excessive waiting (>20 min): {self.customers_left_excessive_wait}")
+        print(f"Left because denied requeue (exceeded max time): {self.customers_denied_requeue}")
         print(f"Total customers who left: {customers_left}")
         
         if self.customer_total_times:
@@ -396,6 +411,7 @@ if __name__ == "__main__":
 
     # --- WORKLOAD 1 ---
     requeue1 = input_requeue("Workload 1: Off-peak Hours")
+    max_time_requeue1 = float(input("Max time for requeue eligibility (minutes): "))
 
     print("\n" + "#" * 70)
     print("# WORKLOAD 1 with λ =", WORKLOAD1_ARRIVAL_RATE)
@@ -407,13 +423,15 @@ if __name__ == "__main__":
         mean_arrival_time=1 / WORKLOAD1_ARRIVAL_RATE,
         requeue_prob=requeue1,
         arrival_rate=WORKLOAD1_ARRIVAL_RATE,
-        station_configs=station_configs
+        station_configs=station_configs,
+        max_time_for_requeue=max_time_requeue1
     )
 
     input("\nPress Enter to continue to WORKLOAD 2...\n")
 
     # --- WORKLOAD 2 ---
     requeue2 = input_requeue("Workload 2: Peak Hours")
+    max_time_requeue2 = float(input("Max time for requeue eligibility (minutes): "))
 
     print("\n" + "#" * 70)
     print("# WORKLOAD 2 with λ =", WORKLOAD2_ARRIVAL_RATE)
@@ -425,7 +443,8 @@ if __name__ == "__main__":
         mean_arrival_time=1 / WORKLOAD2_ARRIVAL_RATE,
         requeue_prob=requeue2,
         arrival_rate=WORKLOAD2_ARRIVAL_RATE,
-        station_configs=station_configs
+        station_configs=station_configs,
+        max_time_for_requeue=max_time_requeue2
     )
 
     print("\nSimulation completed for all workloads!\n")
