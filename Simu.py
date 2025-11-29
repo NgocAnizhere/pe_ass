@@ -86,6 +86,9 @@ class BuffetSimulation:
         self.waiting_area = []  # Queue for customers waiting to enter stations
         self.unmet_demand_returns = 0  # Count customers returning due to unmet demands
         self.customers_completed_dining = set()  # Track unique customers who finished dining
+        self.customers_left_full_queue = 0  # Customers who left because waiting queue was full
+        self.customers_left_excessive_wait = 0  # Customers who left after waiting > 20 minutes
+        self.customers_in_service_stations = 0  # Track customers currently in service stations (not waiting/dining)
 
     def setup_stations(self, station_configs):
         for config in station_configs:
@@ -101,6 +104,26 @@ class BuffetSimulation:
             print(f"Station '{config['name']}': {config['num_servers']} servers, "
                   f"service time = {config['mean_service_time']:.2f} min, {capacity_str}")
         print()
+    
+    def get_total_waiting_queue_length(self):
+        """Get total number of customers in waiting station queues"""
+        total = sum(len(server.queue) for server in self.stations['waiting'].servers)
+        return total
+    
+    def get_total_service_station_customers(self):
+        """Get total customers in appetizer, main_course, and dessert stations"""
+        total = 0
+        for station_name in ['appetizer', 'main_course', 'dessert']:
+            # Count customers in queue + being served
+            station = self.stations[station_name]
+            for server in station.servers:
+                total += len(server.queue) + server.count  # count = number being served
+        return total
+    
+    def get_dining_total_capacity(self):
+        """Get total capacity of dining station (servers * queue_capacity)"""
+        station = self.stations['dining']
+        return station.num_servers * station.queue_capacity
     
     def generate_service_requirement(self):
         """Generate service requirement in n/n/n format for appetizer/main_course/dessert"""
@@ -123,10 +146,20 @@ class BuffetSimulation:
             customer_id = f"Customer_{self.customer_count}"
             service_req = self.generate_service_requirement()
             
-            self.env.process(self.customer_process(customer_id, requeue_prob, service_req))
+            # Check if waiting station has space
+            waiting_capacity = self.stations['waiting'].num_servers * self.stations['waiting'].queue_capacity
+            current_waiting = self.get_total_waiting_queue_length() + self.stations['waiting'].customers_served
+            
+            if not self.stations['waiting'].has_available_queue():
+                # Waiting queue is full, customer leaves
+                self.customers_left_full_queue += 1
+            else:
+                # Customer can enter
+                self.env.process(self.customer_process(customer_id, requeue_prob, service_req))
 
     def customer_process(self, customer_id, requeue_prob, service_req, is_requeue=False):
         start_time = self.env.now
+        waiting_start_time = self.env.now
         
         # Create a mutable copy of service requirements to track fulfillment
         current_demands = service_req.copy()
@@ -138,8 +171,27 @@ class BuffetSimulation:
         else:
             self.waiting_area.append((customer_id, current_demands, start_time))
         
-        # Process through waiting station
-        yield self.env.process(self.stations['waiting'].serve(customer_id))
+        # Process through waiting station with timeout monitoring
+        waiting_process = self.env.process(self.stations['waiting'].serve(customer_id))
+        timeout_process = self.env.timeout(20)  # 20 minutes max wait
+        
+        # Wait for either service completion or timeout
+        result = yield waiting_process | timeout_process
+        
+        # Check if customer waited too long
+        if timeout_process in result:
+            # Customer waited more than 20 minutes, leaves
+            self.customers_left_excessive_wait += 1
+            return
+        
+        # Check dining capacity constraint before leaving waiting
+        dining_capacity = self.get_dining_total_capacity()
+        while True:
+            customers_in_service = self.get_total_service_station_customers()
+            if customers_in_service < dining_capacity:
+                break
+            # Wait until capacity frees up
+            yield self.env.timeout(0.1)
         
         # Define station order: appetizer -> main_course -> dessert
         station_order = ['appetizer', 'main_course', 'dessert']
@@ -153,8 +205,12 @@ class BuffetSimulation:
                 if current_demands[i] == 1:  # Customer needs this station
                     # Check if station has available queue space
                     if self.stations[station_name].has_available_queue():
+                        # Increment counter before entering service station
+                        self.customers_in_service_stations += 1
                         # Proceed to station and get service
                         yield self.env.process(self.stations[station_name].serve(customer_id))
+                        # Decrement counter after leaving service station
+                        self.customers_in_service_stations -= 1
                         # Mark this demand as fulfilled
                         current_demands[i] = 0
                         demand_met_this_round = True
@@ -164,7 +220,15 @@ class BuffetSimulation:
             if not demand_met_this_round and sum(current_demands) > 0:
                 # Customer returns to waiting area (back of queue)
                 self.waiting_area.append((customer_id, current_demands, start_time))
-                yield self.env.process(self.stations['waiting'].serve(customer_id))
+                
+                # Process through waiting station again with timeout
+                waiting_process = self.env.process(self.stations['waiting'].serve(customer_id))
+                timeout_process = self.env.timeout(20)
+                result = yield waiting_process | timeout_process
+                
+                if timeout_process in result:
+                    self.customers_left_excessive_wait += 1
+                    return
         
         # All food station demands are met, now go to dining station
         while not self.stations['dining'].has_available_queue():
@@ -219,11 +283,16 @@ class BuffetSimulation:
         print(f"\n--- Overall Statistics ---")
         print(f"Total customers arrived: {self.total_customers}")
         print(f"Customers completed: {self.completed_customers}")
-        print(f"Customers still in system: {self.total_customers - self.completed_customers}")
+        customers_left = self.customers_left_full_queue + self.customers_left_excessive_wait
+        print(f"Customers still in system: {self.total_customers - self.completed_customers - customers_left}")
         print(f"Unique customers who completed dining: {len(self.customers_completed_dining)}")
         print(f"Re-queue events (after dining): {self.requeue_count}")
         print(f"Number of customers who requeued: {self.requeue_count}")
         print(f"Returns to waiting (unmet demands): {self.unmet_demand_returns}")
+        print(f"\n--- Customers Who Left ---")
+        print(f"Left because waiting queue was full: {self.customers_left_full_queue}")
+        print(f"Left because of excessive waiting (>20 min): {self.customers_left_excessive_wait}")
+        print(f"Total customers who left: {customers_left}")
         
         if self.customer_total_times:
             avg_total_time = statistics.mean(self.customer_total_times)
