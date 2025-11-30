@@ -80,7 +80,30 @@ class BuffetSimulation:
         self.customers_left_excessive_wait = 0  # Customers who left after waiting > 20 minutes
         self.customers_in_service_stations = 0  # Track customers currently in service stations (not waiting/dining)
         self.customers_denied_requeue = 0  # Customers who left because they exceeded max time for requeue
+        self.event_log = []  # Log of all customer events
+        self.station_snapshots = []  # Snapshots of station conditions at each minute
 
+    def log_event(self, event_type, customer_id, station_name="", details=""):
+        """Log a customer event with timestamp"""
+        self.event_log.append({
+            'time': self.env.now,
+            'event': event_type,
+            'customer': customer_id,
+            'station': station_name,
+            'details': details
+        })
+    
+    def capture_station_snapshot(self):
+        """Capture current state of all stations"""
+        snapshot = {'time': self.env.now}
+        for name, station in self.stations.items():
+            snapshot[name] = {
+                'queue_length': len(station.resource.queue),
+                'in_service': station.resource.count,
+                'total_served': station.customers_served
+            }
+        self.station_snapshots.append(snapshot)
+    
     def setup_stations(self, station_configs):
         for config in station_configs:
             queue_capacity = config.get('queue_capacity', float('inf'))
@@ -149,8 +172,10 @@ class BuffetSimulation:
             if not self.stations['waiting'].has_available_queue():
                 # Waiting queue is full, customer leaves
                 self.customers_left_full_queue += 1
+                self.log_event('ARRIVED_LEFT', customer_id, 'waiting', 'Queue full')
             else:
                 # Customer can enter
+                self.log_event('ARRIVED', customer_id, '', f'Service req: {service_req}')
                 self.env.process(self.customer_process(customer_id, requeue_prob, service_req))
 
     def customer_process(self, customer_id, requeue_prob, service_req, is_requeue=False):
@@ -167,6 +192,8 @@ class BuffetSimulation:
         else:
             self.waiting_area.append((customer_id, current_demands, start_time))
         
+        self.log_event('ENTER_WAITING', customer_id, 'waiting', '')
+        
         # Process through waiting station with timeout monitoring
         waiting_process = self.env.process(self.stations['waiting'].serve(customer_id))
         timeout_process = self.env.timeout(20)  # 20 minutes max wait
@@ -178,6 +205,7 @@ class BuffetSimulation:
         if timeout_process in result:
             # Customer waited more than 20 minutes, leaves
             self.customers_left_excessive_wait += 1
+            self.log_event('LEFT', customer_id, 'waiting', 'Excessive wait (>20 min)')
             return
         
         # Check dining capacity constraint before leaving waiting
@@ -188,6 +216,8 @@ class BuffetSimulation:
                 break
             # Wait until capacity frees up
             yield self.env.timeout(0.1)
+        
+        self.log_event('EXIT_WAITING', customer_id, 'waiting', '')
         
         # Define station order: appetizer -> main_course -> dessert
         station_order = ['appetizer', 'main_course', 'dessert']
@@ -203,10 +233,12 @@ class BuffetSimulation:
                     if self.stations[station_name].has_available_queue():
                         # Increment counter before entering service station
                         self.customers_in_service_stations += 1
+                        self.log_event('ENTER_STATION', customer_id, station_name, '')
                         # Proceed to station and get service
                         yield self.env.process(self.stations[station_name].serve(customer_id))
                         # Decrement counter after leaving service station
                         self.customers_in_service_stations -= 1
+                        self.log_event('EXIT_STATION', customer_id, station_name, '')
                         # Mark this demand as fulfilled
                         current_demands[i] = 0
                         demand_met_this_round = True
@@ -216,6 +248,7 @@ class BuffetSimulation:
             if not demand_met_this_round and sum(current_demands) > 0:
                 # Customer returns to waiting area (back of queue)
                 self.waiting_area.append((customer_id, current_demands, start_time))
+                self.log_event('RETURN_WAITING', customer_id, 'waiting', f'Unmet demands: {current_demands}')
                 
                 # Process through waiting station again with timeout
                 waiting_process = self.env.process(self.stations['waiting'].serve(customer_id))
@@ -224,13 +257,16 @@ class BuffetSimulation:
                 
                 if timeout_process in result:
                     self.customers_left_excessive_wait += 1
+                    self.log_event('LEFT', customer_id, 'waiting', 'Excessive wait on return (>20 min)')
                     return
         
         # All food station demands are met, now go to dining station
         while not self.stations['dining'].has_available_queue():
             yield self.env.timeout(0.1)  # Wait for space
         
+        self.log_event('ENTER_STATION', customer_id, 'dining', '')
         yield self.env.process(self.stations['dining'].serve(customer_id))
+        self.log_event('EXIT_STATION', customer_id, 'dining', '')
         
         # Track unique customer who completed dining (extract base ID without _requeue suffix)
         base_customer_id = customer_id.split('_requeue')[0].split('_unmet')[0]
@@ -244,6 +280,7 @@ class BuffetSimulation:
             # Customer has unmet demands, return to waiting queue
             self.unmet_demand_returns += 1
             self.waiting_area.append((customer_id, current_demands, start_time))
+            self.log_event('REQUEUE_UNMET', customer_id, '', f'Unmet demands: {current_demands}')
             yield self.env.process(self.customer_process(customer_id + "_unmet", requeue_prob, current_demands, is_requeue=False))
         # Check requeue probability for getting more food
         elif random.random() < requeue_prob:
@@ -254,22 +291,34 @@ class BuffetSimulation:
                 self.customers_denied_requeue += 1
                 self.customer_total_times.append(time_in_system)
                 self.completed_customers += 1
+                self.log_event('DEPARTED', customer_id, '', f'Denied requeue (time: {time_in_system:.2f} min)')
             else:
                 # Customer is within time limit (or no limit), allow requeue
                 self.requeue_count += 1
                 # Generate new service requirement for requeue
                 new_service_req = self.generate_service_requirement()
+                self.log_event('REQUEUE', customer_id, '', f'New req: {new_service_req}')
                 self.env.process(self.customer_process(customer_id + "_requeue", requeue_prob, new_service_req, is_requeue=True))
         else:
             # Customer leaves the system
             self.customer_total_times.append(time_in_system)
             self.completed_customers += 1
+            self.log_event('DEPARTED', customer_id, '', f'Total time: {time_in_system:.2f} min')
+    
+    def station_monitor(self, until_time):
+        """Monitor and log station conditions every minute"""
+        current_minute = 0
+        while current_minute <= until_time:
+            yield self.env.timeout(1)  # Wait 1 minute
+            current_minute = int(self.env.now)
+            self.capture_station_snapshot()
     
     def run_simulation(self, until_time, mean_arrival_time, requeue_prob, arrival_rate, station_configs, max_time_for_requeue):
         self.setup_stations(station_configs)
         self.max_time_for_requeue = max_time_for_requeue
         
         self.env.process(self.generate_arrivals(mean_arrival_time, requeue_prob))
+        self.env.process(self.station_monitor(until_time))
         
         print(f"=== Running Simulation for {until_time} minutes ===")
         print(f"λ = {arrival_rate} customers/min")
@@ -287,6 +336,8 @@ class BuffetSimulation:
         print(f"Simulation completed in {end_real_time - start_real_time:.2f} seconds\n")
         
         self.print_results()
+        self.print_event_log()
+        self.print_station_timeline()
     
     def print_results(self):
         print("=" * 70)
@@ -361,6 +412,32 @@ class BuffetSimulation:
             else:
                 utilization = 0
             print(f"\nServer utilization: {utilization:.2f}%")
+    
+    def print_event_log(self):
+        """Print chronological event log"""
+        print("\n" + "=" * 70)
+        print("CUSTOMER EVENT LOG (Chronological)")
+        print("=" * 70)
+        print(f"{'Event':<20} {'Customer':<20} {'Station':<15} {'Details'}")
+        print("-" * 70)
+        
+        for event in self.event_log:
+            print(f"{event['event']:<20} {event['customer']:<20} {event['station']:<15} {event['details']}")
+    
+    def print_station_timeline(self):
+        """Print station conditions at each minute"""
+        print("\n" + "=" * 70)
+        print("STATION CONDITIONS TIMELINE (Every Minute)")
+        print("=" * 70)
+        
+        for snapshot in self.station_snapshots:
+            time_point = snapshot['time']
+            print(f"\n--- Time: {time_point:.1f} minutes ---")
+            
+            for station_name in ['waiting', 'appetizer', 'main_course', 'dessert', 'dining']:
+                if station_name in snapshot:
+                    stats = snapshot[station_name]
+                    print(f"  {station_name.capitalize():<15}: Queue={stats['queue_length']:<3} InService={stats['in_service']:<3} TotalServed={stats['total_served']}")
 
 
 # -------------------------------------------
