@@ -466,7 +466,6 @@ MAX_TIME_REQUEUE_WORKLOAD2 = 45.0  # 45 minutes
 # Hardcoded test station parameters
 TEST_NUM_SERVERS = 3
 TEST_MEAN_SERVICE_TIME = 5.0
-TEST_ARRIVAL_RATE = 0.5
 TEST_QUEUE_CAPACITY = float('inf')
 TEST_SIM_TIME = 60.0
 
@@ -475,16 +474,15 @@ TEST_SIM_TIME = 60.0
 #          UNIT TEST FOR INDIVIDUAL STATION
 # -------------------------------------------
 
-def test_single_station():
+def run_single_station_test(arrival_rate, test_name):
+    """Run a single station test with given arrival rate"""
     print("\n" + "=" * 70)
-    print("SINGLE STATION TEST MODE")
+    print(f"{test_name}")
     print("=" * 70)
-    print("Test an individual M/M/c queue to verify queueing behavior\n")
     
     # Use hardcoded parameters
     num_servers = TEST_NUM_SERVERS
     mean_service_time = TEST_MEAN_SERVICE_TIME
-    arrival_rate = TEST_ARRIVAL_RATE
     queue_capacity = TEST_QUEUE_CAPACITY
     sim_time = TEST_SIM_TIME
     
@@ -548,6 +546,29 @@ def test_single_station():
         print(f"Theoretical Utilization (ρ): {((arrival_rate * mean_service_time) / num_servers * 100):.2f}%")
     
     print("\n" + "=" * 70 + "\n")
+
+
+def test_single_station():
+    """Run single station tests for both workload arrival rates"""
+    print("\n" + "=" * 70)
+    print("SINGLE STATION TEST MODE")
+    print("=" * 70)
+    print("Test an individual M/M/c queue to verify queueing behavior")
+    print("Running 2 tests for each workload arrival rate\n")
+    
+    # Test 1: Workload 1 arrival rate (λ = 1.0)
+    run_single_station_test(WORKLOAD1_ARRIVAL_RATE, "TEST 1: Workload 1 Arrival Rate (λ = 1.0)")
+    
+    # Test 2: Workload 1 arrival rate (λ = 1.0) - second run
+    run_single_station_test(WORKLOAD1_ARRIVAL_RATE, "TEST 2: Workload 1 Arrival Rate (λ = 1.0)")
+    
+    # Test 3: Workload 2 arrival rate (λ = 5.0)
+    run_single_station_test(WORKLOAD2_ARRIVAL_RATE, "TEST 3: Workload 2 Arrival Rate (λ = 5.0)")
+    
+    # Test 4: Workload 2 arrival rate (λ = 5.0) - second run
+    run_single_station_test(WORKLOAD2_ARRIVAL_RATE, "TEST 4: Workload 2 Arrival Rate (λ = 5.0)")
+    
+    print("\nAll single station tests completed!\n")
 
 
 # -------------------------------------------
