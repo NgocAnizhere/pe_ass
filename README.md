@@ -1,72 +1,121 @@
+Here is the **English version** of the README file, ready to be copied into your project. It includes clear instructions, theoretical context, and a step-by-step input guide.
 
-Buffet Queueing Simulation
-This project is a discrete-event simulation built with Python and SimPy. It models the flow of customers through a buffet restaurant, tracking queue lengths, wait times, server utilization, and customer behaviors such as balking (leaving if the queue is full) or re-queuing (getting seconds).
-Features
-•	M/M/c Queue Model: Simulates stations with multiple servers and a single shared queue.
-•	Complex Customer Logic:
-o	Routing: Customers skip stations they don't want (Appetizer/Main/Dessert).
-o	Balking: Customers leave if a station's queue is at capacity.
-o	Reneging: Customers leave if they wait in the entry queue for more than 20 minutes.
-o	Dining Capacity: Customers cannot leave the waiting area until a seat is available in the dining section.
-o	Re-queuing: Customers may rejoin the food queues after eating if they are within the time limit.
-•	Two Simulation Modes:
-1.	Full Buffet Simulation: Runs consecutive workloads (Off-peak and Peak).
-2.	Single Station Test: A unit test to verify the mathematical properties of a single M/M/c queue.
-Prerequisites
-•	Python 3.x
-•	simpy library
-Installation
-1.	Save the simulation code into a file named buffet_sim.py.
-2.	Install the required library using pip:
-Bash
+-----
+
+# Buffet & Queueing System Simulation
+
+This project is a discrete-event simulation built using Python's **SimPy** library. It models the complex flow of a Buffet restaurant to analyze service efficiency, bottlenecks, and customer behavior under different constraints.
+
+## 1\. Prerequisites & Installation
+
+To run this simulation, you must have Python installed and the `simpy` library.
+
+**Install the library:**
+
+```bash
 pip install simpy
-How to Run
-Open your terminal or command prompt, navigate to the directory where you saved the file, and run:
-Bash
-python buffet_sim.py
-Usage Guide
-When you run the script, you will be prompted to select a mode.
-Mode 1: Full Buffet Simulation
-This simulates the entire restaurant workflow. You will be asked to input configuration for 5 specific stations.
-1. Simulation Setup:
-•	Enter the total Simulation Time (in minutes).
-2. Station Configuration:
-The script will ask for the following parameters for 5 stations in this exact order: Waiting, Appetizer, Main Course, Dessert, and Dining.
-For each station, you must provide:
-•	Number of Servers: (e.g., How many chefs at the station, or how many tables in Dining).
-•	Mean Service Time: (in minutes).
-•	Queue Capacity: The max number of people allowed in line (Press Enter for unlimited).
-3. Workload Configuration:
-The simulation runs two phases automatically:
-•	Workload 1 (Off-peak, $\lambda=1.0$): You will input the probability (0-1) that a customer gets seconds.
-•	Workload 2 (Peak, $\lambda=5.0$): You will input the probability (0-1) that a customer gets seconds.
-•	Max Time for Requeue: Limits re-queuing if the customer has been in the restaurant too long (enter 0 for no limit).
-Mode 2: Single Station Test
-This is a diagnostic tool to test a single queue (like a bank teller or a single food stall).
-1.	Enter Number of Servers.
-2.	Enter Mean Service Time.
-3.	Enter Arrival Rate ($\lambda$).
-4.	Enter Queue Capacity.
-5.	Enter Simulation Time.
-The script will output theoretical vs. actual utilization to verify the system is working correctly.
-Simulation Flow Logic
-1.	Arrival: Customer arrives at the Waiting station.
-2.	Entry Check: If the waiting queue is full, they leave (Balk).
-3.	Wait: They wait to be seated. If the wait > 20 mins, they leave (Reneg).
-4.	Dining Capacity Check: Even if passed the waiting station, they hold until Dining capacity permits entry.
-5.	Food Stations: Customer visits Appetizer -> Main -> Dessert based on random demand.
-6.	Dining: Customer sits at the Dining station to eat.
-7.	Re-queue Loop: Based on probability and time limits, the customer may return to the food stations (priority queue) or leave the system.
-Interpreting Results
-At the end of the simulation, the script prints a detailed report:
-•	Overall Statistics: Total customers served, lost, and currently in the system.
-•	Station Metrics:
-o	Wait Time: How long customers stood in line.
-o	Service Time: How long they spent getting food/eating.
-o	Queue Length: Average and Max line sizes.
-o	Utilization: Percentage of time the servers/tables were busy.
-Troubleshooting
-•	Input Errors: Ensure you enter integers for server counts and numbers/floats for times.
-•	Zero Division: Do not enter 0 for Mean Service Time.
-•	Infinite Loops: If you set very high arrival rates with very low service rates (servers too slow), the simulation might take longer to process all events, though until=until_time usually prevents this.
+```
 
+**Run the simulation:**
+
+```bash
+python <your_file_name>.py
+```
+
+-----
+
+## 2\. Theoretical Background
+
+This simulation is based on **Queueing Theory**, specifically the **M/M/c** model. Understanding these terms will help you input the correct data:
+
+  * **M/M/c Model:**
+      * **M (Markov):** Arrival times are random (Poisson process / Exponential distribution).
+      * **M (Markov):** Service times are random (Exponential distribution).
+      * **c (Servers):** The number of service channels (e.g., number of chefs at a station, or number of tables in the dining area).
+  * **$\lambda$ (Lambda - Arrival Rate):** How many customers arrive per minute.
+  * **$\mu$ (Mu - Service Rate):** How fast a single server can process one customer (1 / Mean Service Time).
+  * **Balking:** A customer arrives, sees the queue is full (exceeds `queue_capacity`), and leaves immediately.
+  * **Reneging:** A customer joins the queue but leaves after waiting too long (defined as \> 20 minutes in the Waiting Area).
+  * **Re-queueing:** The behavior where a customer finishes eating and decides to go back to the food stations for more.
+
+-----
+
+## 3\. Simulation Modes
+
+Upon starting the program, you will be asked to select one of two modes:
+
+### MODE 1: Run Full Buffet Simulation
+
+  * **Purpose:** Simulates the complete, realistic workflow of a buffet restaurant.
+  * **Workflow Logic:**
+    1.  **Arrival:** Customers arrive at the `Waiting` station. If the queue is full or they wait \> 20 mins, they leave.
+    2.  **Capacity Check:** Customers wait in the lobby until a seat is available in the `Dining` area.
+    3.  **Food Stations:** Customers proceed to `Appetizer` $\rightarrow$ `Main Course` $\rightarrow$ `Dessert` based on random demand.
+    4.  **Dining:** Customers sit and eat.
+    5.  **Loop:** After eating, they may leave or **Re-queue** to get more food if they haven't exceeded the time limit.
+  * **Scenarios:** The simulation automatically runs two consecutive workloads:
+      * *Workload 1:* Off-peak hours ($\lambda = 1.0$ cust/min).
+      * *Workload 2:* Peak hours ($\lambda = 5.0$ cust/min).
+
+### MODE 2: Test Single Station
+
+  * **Purpose:** A unit test for a single standard M/M/c queue.
+  * **Use Case:** Use this to verify mathematical correctness without the complex logic of the full restaurant (e.g., verifying that a specific number of servers can handle a specific arrival rate).
+
+-----
+
+## 4\. Input Guide
+
+### For MODE 1 (Full Simulation)
+
+You will need to configure parameters for **5 stations** in this order: **Waiting**, **Appetizer**, **Main Course**, **Dessert**, and **Dining**.
+
+1.  **Simulation Time:** Total run time in minutes (e.g., `120`).
+2.  **Station Configuration (Repeat for all 5 stations):**
+      * `Number of servers`: The number of staff or resources (e.g., for Dining, this is the number of seats).
+      * `Mean service time`: Average time to serve one person (minutes).
+      * `Total queue capacity`: Max people allowed in line. **Press Enter** for an unlimited line.
+3.  **Workload Configuration:**
+      * `Requeue probability`: Chance a customer gets seconds (0.0 to 1.0). E.g., `0.3` is 30%.
+      * `Max time for requeue eligibility`: Time limit (minutes). If a customer has stayed longer than this, they are not allowed to get seconds. Enter `0` for no limit.
+
+### For MODE 2 (Single Station Test)
+
+This mode only asks for parameters for one isolated queue:
+
+1.  `Number of servers`: Number of service channels ($c$).
+2.  `Mean service time`: Average time to serve one customer ($1/\mu$).
+3.  `Arrival rate`: Customers per minute ($\lambda$).
+4.  `Queue capacity`: Max queue size (Press Enter for unlimited).
+5.  `Simulation time`: Duration of the test.
+
+-----
+
+## 5\. Interpreting Results
+
+After the simulation finishes, check the output for:
+
+  * **Overall Statistics:**
+      * `Customers completed`: Total served successfully.
+      * `Customers left...`: Lost business due to full queues (Balking) or long waits (Reneging).
+      * `Re-queue events`: Indicates how much extra load "second rounds" added to the system.
+  * **Station Metrics:**
+      * `Average wait time`: Lower is better.
+      * `Server utilization`:
+          * **Near 100%:** The station is a bottleneck (understaffed).
+          * **Very low:** The station is overstaffed.
+
+-----
+
+## Sample Configuration (For Quick Start)
+
+If you want to run **Mode 1** quickly to see how it works, use these values:
+
+  * **Sim Time:** `480` (8 hours)
+  * **Waiting Station:** 1 server, 1 min service, capacity: `Enter` (unlimited)
+  * **Appetizer:** 2 servers, 2 min service, capacity: `10`
+  * **Main Course:** 3 servers, 5 min service, capacity: `15`
+  * **Dessert:** 2 servers, 3 min service, capacity: `10`
+  * **Dining:** 50 servers (seats), 45 min service (eating time), capacity: `Enter`
+  * **Requeue Probability:** `0.4`
+  * **Max time requeue:** `90`
