@@ -449,11 +449,11 @@ WORKLOAD2_ARRIVAL_RATE = 5.0
 
 # Hardcoded station configurations
 STATION_CONFIGS = [
-    {"name": "waiting", "num_servers": 2, "mean_service_time": 5.0, "queue_capacity": 10},
-    {"name": "appetizer", "num_servers": 3, "mean_service_time": 3.0, "queue_capacity": float('inf')},
-    {"name": "main_course", "num_servers": 4, "mean_service_time": 7.0, "queue_capacity": float('inf')},
-    {"name": "dessert", "num_servers": 2, "mean_service_time": 4.0, "queue_capacity": float('inf')},
-    {"name": "dining", "num_servers": 10, "mean_service_time": 15.0, "queue_capacity": 5}
+    {"name": "waiting", "num_servers": 3, "mean_service_time": 1.0, "queue_capacity": 10},
+    {"name": "appetizer", "num_servers": 3, "mean_service_time": 3.0, "queue_capacity": 3},
+    {"name": "main_course", "num_servers": 4, "mean_service_time": 7.0, "queue_capacity": 3},
+    {"name": "dessert", "num_servers": 2, "mean_service_time": 4.0, "queue_capacity": 3},
+    {"name": "dining", "num_servers": 10, "mean_service_time": 15.0, "queue_capacity": 3}
 ]
 
 # Hardcoded simulation parameters
@@ -463,114 +463,6 @@ REQUEUE_PROB_WORKLOAD2 = 0.2  # 20%
 MAX_TIME_REQUEUE_WORKLOAD1 = 0  # unlimited
 MAX_TIME_REQUEUE_WORKLOAD2 = 45.0  # 45 minutes
 
-# Hardcoded test station parameters
-TEST_NUM_SERVERS = 3
-TEST_MEAN_SERVICE_TIME = 5.0
-TEST_QUEUE_CAPACITY = float('inf')
-TEST_SIM_TIME = 60.0
-
-
-# -------------------------------------------
-#          UNIT TEST FOR INDIVIDUAL STATION
-# -------------------------------------------
-
-def run_single_station_test(arrival_rate, test_name):
-    """Run a single station test with given arrival rate"""
-    print("\n" + "=" * 70)
-    print(f"{test_name}")
-    print("=" * 70)
-    
-    # Use hardcoded parameters
-    num_servers = TEST_NUM_SERVERS
-    mean_service_time = TEST_MEAN_SERVICE_TIME
-    queue_capacity = TEST_QUEUE_CAPACITY
-    sim_time = TEST_SIM_TIME
-    
-    # Create environment and station
-    env = simpy.Environment()
-    station = ServiceStation(env, num_servers, mean_service_time, queue_capacity)
-    
-    # Customer arrival process
-    def customer_arrivals(env, station, arrival_rate):
-        customer_id = 0
-        while True:
-            yield env.timeout(random.expovariate(arrival_rate))
-            customer_id += 1
-            if station.has_available_queue():
-                env.process(station.serve(f"Customer_{customer_id}"))
-            else:
-                print(f"Customer_{customer_id} balked (queue full)")
-    
-    # Start process
-    env.process(customer_arrivals(env, station, arrival_rate))
-    
-    # Run simulation
-    print(f"\n=== Running Single Station Test for {sim_time} minutes ===")
-    print(f"Servers (c): {num_servers}")
-    print(f"Mean service time (μ): {mean_service_time} min")
-    print(f"Arrival rate (λ): {arrival_rate} customers/min")
-    print(f"Traffic intensity (ρ): {(arrival_rate * mean_service_time) / num_servers:.4f}")
-    print(f"Queue capacity: {queue_capacity if queue_capacity != float('inf') else 'Unlimited'}\n")
-    
-    start_time = time.time()
-    env.run(until=sim_time)
-    end_time = time.time()
-    
-    # Print results
-    print(f"\nSimulation completed in {end_time - start_time:.4f} seconds\n")
-    print("=" * 70)
-    print("RESULTS")
-    print("=" * 70)
-    print(f"Customers served: {station.customers_served}")
-    
-    if station.wait_times:
-        print(f"\nWait Times:")
-        print(f"  Average: {statistics.mean(station.wait_times):.4f} minutes")
-        print(f"  Max: {max(station.wait_times):.4f} minutes")
-        print(f"  Min: {min(station.wait_times):.4f} minutes")
-    
-    if station.service_times:
-        print(f"\nService Times:")
-        print(f"  Average: {statistics.mean(station.service_times):.4f} minutes")
-        print(f"  Theoretical mean: {mean_service_time:.4f} minutes")
-    
-    if station.queue_lengths:
-        print(f"\nQueue Lengths:")
-        print(f"  Average: {statistics.mean(station.queue_lengths):.4f}")
-        print(f"  Max: {max(station.queue_lengths)}")
-    
-    if station.service_times:
-        total_service = sum(station.service_times)
-        utilization = (total_service / (sim_time * num_servers)) * 100
-        print(f"\nServer Utilization: {utilization:.2f}%")
-        print(f"Theoretical Utilization (ρ): {((arrival_rate * mean_service_time) / num_servers * 100):.2f}%")
-    
-    print("\n" + "=" * 70 + "\n")
-
-
-def test_single_station():
-    """Run single station tests for both workload arrival rates"""
-    print("\n" + "=" * 70)
-    print("SINGLE STATION TEST MODE")
-    print("=" * 70)
-    print("Test an individual M/M/c queue to verify queueing behavior")
-    print("Running 2 tests for each workload arrival rate\n")
-    
-    # Test 1: Workload 1 arrival rate (λ = 1.0)
-    run_single_station_test(WORKLOAD1_ARRIVAL_RATE, "TEST 1: Workload 1 Arrival Rate (λ = 1.0)")
-    
-    # Test 2: Workload 1 arrival rate (λ = 1.0) - second run
-    run_single_station_test(WORKLOAD1_ARRIVAL_RATE, "TEST 2: Workload 1 Arrival Rate (λ = 1.0)")
-    
-    # Test 3: Workload 2 arrival rate (λ = 5.0)
-    run_single_station_test(WORKLOAD2_ARRIVAL_RATE, "TEST 3: Workload 2 Arrival Rate (λ = 5.0)")
-    
-    # Test 4: Workload 2 arrival rate (λ = 5.0) - second run
-    run_single_station_test(WORKLOAD2_ARRIVAL_RATE, "TEST 4: Workload 2 Arrival Rate (λ = 5.0)")
-    
-    print("\nAll single station tests completed!\n")
-
-
 # -------------------------------------------
 #          MAIN EXECUTION
 # -------------------------------------------
@@ -578,48 +470,38 @@ def test_single_station():
 if __name__ == "__main__":
     random.seed(42)
     
-    # Choose mode
     print("\n" + "=" * 70)
     print("BUFFET QUEUEING SIMULATION")
     print("=" * 70)
-    print("1. Run Full Buffet Simulation (both workloads)")
-    print("2. Test Single Station (M/M/c verification)")
-    mode = input("\nSelect mode (1 or 2): ").strip()
     
-    if mode == "2":
-        # Run single station test
-        test_single_station()
-    else:
-        # Run full simulation with hardcoded values
-        print("\n" + "#" * 70)
-        print("# WORKLOAD 1 with λ =", WORKLOAD1_ARRIVAL_RATE)
-        print("#" * 70)
+    # Run full simulation with hardcoded values
+    print("\n" + "#" * 70)
+    print("# WORKLOAD 1 with λ =", WORKLOAD1_ARRIVAL_RATE)
+    print("#" * 70)
 
-        sim1 = BuffetSimulation()
-        sim1.run_simulation(
-            until_time=SIM_TIME,
-            mean_arrival_time=1 / WORKLOAD1_ARRIVAL_RATE,
-            requeue_prob=REQUEUE_PROB_WORKLOAD1,
-            arrival_rate=WORKLOAD1_ARRIVAL_RATE,
-            station_configs=STATION_CONFIGS,
-            max_time_for_requeue=MAX_TIME_REQUEUE_WORKLOAD1
-        )
+    sim1 = BuffetSimulation()
+    sim1.run_simulation(
+        until_time=SIM_TIME,
+        mean_arrival_time=1 / WORKLOAD1_ARRIVAL_RATE,
+        requeue_prob=REQUEUE_PROB_WORKLOAD1,
+        arrival_rate=WORKLOAD1_ARRIVAL_RATE,
+        station_configs=STATION_CONFIGS,
+        max_time_for_requeue=MAX_TIME_REQUEUE_WORKLOAD1
+    )
 
-        input("\nPress Enter to continue to WORKLOAD 2...\n")
+    # --- WORKLOAD 2 ---
+    print("\n" + "#" * 70)
+    print("# WORKLOAD 2 with λ =", WORKLOAD2_ARRIVAL_RATE)
+    print("#" * 70)
 
-        # --- WORKLOAD 2 ---
-        print("\n" + "#" * 70)
-        print("# WORKLOAD 2 with λ =", WORKLOAD2_ARRIVAL_RATE)
-        print("#" * 70)
+    sim2 = BuffetSimulation()
+    sim2.run_simulation(
+        until_time=SIM_TIME,
+        mean_arrival_time=1 / WORKLOAD2_ARRIVAL_RATE,
+        requeue_prob=REQUEUE_PROB_WORKLOAD2,
+        arrival_rate=WORKLOAD2_ARRIVAL_RATE,
+        station_configs=STATION_CONFIGS,
+        max_time_for_requeue=MAX_TIME_REQUEUE_WORKLOAD2
+    )
 
-        sim2 = BuffetSimulation()
-        sim2.run_simulation(
-            until_time=SIM_TIME,
-            mean_arrival_time=1 / WORKLOAD2_ARRIVAL_RATE,
-            requeue_prob=REQUEUE_PROB_WORKLOAD2,
-            arrival_rate=WORKLOAD2_ARRIVAL_RATE,
-            station_configs=STATION_CONFIGS,
-            max_time_for_requeue=MAX_TIME_REQUEUE_WORKLOAD2
-        )
-
-        print("\nSimulation completed for all workloads!\n")
+    print("\nSimulation completed for all workloads!\n")
