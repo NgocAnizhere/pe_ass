@@ -1,117 +1,294 @@
-# Buffet & Queueing System Simulation
+# Self-Service Buffet Queueing System Simulation
 
-This project is a discrete-event simulation built using Python's **SimPy** library. It models the complex flow of a Buffet restaurant to analyze service efficiency, bottlenecks, and customer behavior under different constraints.
+**Course:** System Performance Evaluation (CO3007)  
+**Group:** Iron Sentinel
 
-## 1\. Prerequisites & Installation
+This project is a discrete-event simulation built using Python's **SimPy** library. It models a self-service buffet restaurant system with an **Open Queueing Network with Feedback Loop**, representing customers who return for more food after dining.
 
-To run this simulation, you must have Python installed and the `simpy` library.
+---
 
-**Install the library:**
+## 1. Overview
+
+### System Architecture
+
+The simulation models a buffet restaurant with the following service flow:
+
+1. **Arrival & Waiting** → Customers arrive and wait at the entrance
+2. **Food Service** → Sequential service at three counters: **Appetizer → Main Course → Dessert**
+3. **Dining** → Customers sit and consume their meal
+4. **Feedback Decision** → After dining, customers either exit or re-queue for more food based on probability (δ)
+
+### Key Features
+
+- **M/M/c Queue Model** for each service station
+- **Random Service Requirements** - Customers randomly need appetizer/main course/dessert (at least one required)
+- **Feedback Loop** - Customers can return for more food with configurable probability
+- **Capacity Constraints** - Queue limits and dining capacity management
+- **Balking** - Customers leave if waiting queue is full
+- **Reneging** - Customers leave if waiting time exceeds input waiting time (in minutes)
+- **Time-Limited Re-queueing** - Customers cannot re-queue if they exceed maximum time in system
+
+---
+
+## 2. Prerequisites & Installation
+
+### Requirements
+
+- Python 3.7 or higher
+- SimPy library
+
+### Installation
 
 ```bash
 pip install simpy
 ```
 
-**Run the simulation:**
+For Jupyter Notebook users, also install:
 
 ```bash
-python <your_file_name>.py
+pip install ipykernel jupyter
 ```
 
 ---
 
-## 2\. Theoretical Background
+## 3. System Components
 
-This simulation is based on **Queueing Theory**, specifically the **M/M/c** model. Understanding these terms will help you input the correct data:
+### Service Stations (M/M/c Queues)
 
-- **M/M/c Model:**
-  - **M (Markov):** Arrival times are random (Poisson process / Exponential distribution).
-  - **M (Markov):** Service times are random (Exponential distribution).
-  - **c (Servers):** The number of service channels (e.g., number of chefs at a station, or number of tables in the dining area).
-- **$\lambda$ (Lambda - Arrival Rate):** How many customers arrive per minute.
-- **$\mu$ (Mu - Service Rate):** How fast a single server can process one customer (1 / Mean Service Time).
-- **Balking:** A customer arrives, sees the queue is full (exceeds `queue_capacity`), and leaves immediately.
-- **Reneging:** A customer joins the queue but leaves after waiting too long (defined as \> 20 minutes in the Waiting Area).
-- **Re-queueing:** The behavior where a customer finishes eating and decides to go back to the food stations for more.
+| Station Name    | Real-world Entity | Servers (c)  | Service Time Mean (1/µ) | Queue Capacity |
+| :-------------- | :---------------- | :----------- | :---------------------- | :------------- |
+| **Waiting**     | Entrance          | Configurable | 0.5-1.0 mins            | Limited        |
+| **Appetizer**   | Food Counter 1    | Configurable | 1.0-3.0 mins            | Limited        |
+| **Main Course** | Food Counter 2    | Configurable | 1.5-7.0 mins            | Limited        |
+| **Dessert**     | Food Counter 3    | Configurable | 0.8-4.0 mins            | Limited        |
+| **Dining**      | Tables/Seats      | Configurable | 15.0 mins               | Limited        |
 
----
+### Workload Configurations
 
-## 3\. Simulation Modes
+The simulation includes two pre-configured workloads:
 
-Upon starting the program, you will be asked to select one of two modes:
-
-### MODE 1: Run Full Buffet Simulation
-
-- **Purpose:** Simulates the complete, realistic workflow of a buffet restaurant.
-- **Workflow Logic:**
-  1.  **Arrival:** Customers arrive at the `Waiting` station. If the queue is full or they wait \> 20 mins, they leave.
-  2.  **Capacity Check:** Customers wait in the lobby until a seat is available in the `Dining` area.
-  3.  **Food Stations:** Customers proceed to `Appetizer` $\rightarrow$ `Main Course` $\rightarrow$ `Dessert` based on random demand.
-  4.  **Dining:** Customers sit and eat.
-  5.  **Loop:** After eating, they may leave or **Re-queue** to get more food if they haven't exceeded the time limit.
-- **Scenarios:** The simulation automatically runs two consecutive workloads:
-  - _Workload 1:_ Off-peak hours ($\lambda = 1.0$ cust/min).
-  - _Workload 2:_ Peak hours ($\lambda = 5.0$ cust/min).
-
-### MODE 2: Test Single Station
-
-- **Purpose:** A unit test for a single standard M/M/c queue.
-- **Use Case:** Use this to verify mathematical correctness without the complex logic of the full restaurant (e.g., verifying that a specific number of servers can handle a specific arrival rate).
+- **Workload 1 (Off-peak):** λ = 1.0 customer/minute, 30% re-queue probability , unlimited time (depend on input)
+- **Workload 2 (Peak Hours):** λ = 5.0 customers/minute, 20% re-queue probability , 45-minute time limit (depend on input)
 
 ---
 
-## 4\. Input Guide
+## 4. Running the Simulation
 
-### For MODE 1 (Full Simulation)
+### Option A: Python Script (Simu.py)
 
-You will need to configure parameters for **5 stations** in this order: **Waiting**, **Appetizer**, **Main Course**, **Dessert**, and **Dining**.
+**Note:** The current implementation uses hardcoded configurations in `Implementation.ipynb`. To create a standalone `Simu.py`:
 
-1.  **Simulation Time:** Total run time in minutes (e.g., `120`).
-2.  **Station Configuration (Repeat for all 5 stations):**
-    - `Number of servers`: The number of staff or resources (e.g., for Dining, this is the number of seats).
-    - `Mean service time`: Average time to serve one person (minutes).
-    - `Total queue capacity`: Max people allowed in line. **Press Enter** for an unlimited line.
-3.  **Workload Configuration:**
-    - `Requeue probability`: Chance a customer gets seconds (0.0 to 1.0). E.g., `0.3` is 30%.
-    - `Max time for requeue eligibility`: Time limit (minutes). If a customer has stayed longer than this, they are not allowed to get seconds. Enter `0` for no limit.
+1. Extract the classes and main execution code from the notebook
+2. Run the script:
 
-### For MODE 2 (Single Station Test)
+```bash
+python Simu.py
+```
 
-This mode only asks for parameters for one isolated queue:
+The simulation will automatically run both Workload 1 and Workload 2 scenarios.
 
-1.  `Number of servers`: Number of service channels ($c$).
-2.  `Mean service time`: Average time to serve one customer ($1/\mu$).
-3.  `Arrival rate`: Customers per minute ($\lambda$).
-4.  `Queue capacity`: Max queue size (Press Enter for unlimited).
-5.  `Simulation time`: Duration of the test.
+### Option B: Jupyter Notebook (Implementation.ipynb)
+
+**Recommended for interactive analysis and visualization**
+
+#### Step 1: Start Jupyter Notebook
+
+```bash
+jupyter notebook
+```
+
+Or open `Implementation.ipynb` directly in VS Code.
+
+#### Step 2: Execute Cells in Order
+
+1. **Cell 1:** Install SimPy (if not already installed)
+
+   ```python
+   pip install simpy
+   ```
+
+2. **Cell 2:** Import required libraries
+
+   ```python
+   import simpy
+   import random
+   import statistics
+   import time
+   ```
+
+3. **Cell 3:** ServiceStation class definition
+
+   - Defines the M/M/c queue model for each service station
+
+4. **Cell 4:** BuffetSimulation class definition
+
+   - Main simulation controller with routing logic and data collection
+
+5. **Cell 5 or 6:** Run simulation with pre-configured workloads
+   - Cell 5: Original configuration (higher service times)
+   - Cell 6: Optimized configuration (lower service times)
+
+#### Step 3: Analyze Results
+
+The output includes:
+
+- Overall statistics (arrivals, completions, customers who left)
+- Station-by-station metrics (wait times, utilization, queue lengths)
+- Event log (chronological customer journey)
+- Station timeline (snapshots at each minute)
 
 ---
 
-## 5\. Interpreting Results
+## 5. Configuration Parameters
 
-After the simulation finishes, check the output for:
+### Station Configuration
 
-- **Overall Statistics:**
-  - `Customers completed`: Total served successfully.
-  - `Customers left...`: Lost business due to full queues (Balking) or long waits (Reneging).
-  - `Re-queue events`: Indicates how much extra load "second rounds" added to the system.
-- **Station Metrics:**
-  - `Average wait time`: Lower is better.
-  - `Server utilization`:
-    - **Near or over 100%:** The station is a bottleneck (understaffed).
-    - **Very low:** The station is overstaffed.
+Each station requires:
+
+- `name`: Station identifier (waiting, appetizer, main_course, dessert, dining)
+- `num_servers`: Number of parallel servers/resources (c)
+- `mean_service_time`: Average service time in minutes (1/µ)
+- `queue_capacity`: Maximum queue size (customers waiting)
+
+### Simulation Parameters
+
+- `SIM_TIME`: Simulation duration in minutes (default: 60)
+- `REQUEUE_PROB`: Probability customer returns for more food (0.0-1.0)
+- `MAX_TIME_REQUEUE`: Maximum time limit for re-queue eligibility (0 = unlimited)
+- `ARRIVAL_RATE`: Customer arrival rate λ (customers per minute)
+
+### Example Configuration (Cell 6 - Optimized)
+
+```python
+STATION_CONFIGS = [
+    {"name": "waiting", "num_servers": 10, "mean_service_time": 0.5, "queue_capacity": 10},
+    {"name": "appetizer", "num_servers": 3, "mean_service_time": 1.0, "queue_capacity": 3},
+    {"name": "main_course", "num_servers": 4, "mean_service_time": 1.5, "queue_capacity": 3},
+    {"name": "dessert", "num_servers": 2, "mean_service_time": 0.8, "queue_capacity": 3},
+    {"name": "dining", "num_servers": 10, "mean_service_time": 15.0, "queue_capacity": 3}
+]
+```
 
 ---
 
-## Sample Configuration (For Quick Start)
+## 6. Theoretical Background
 
-If you want to run **Mode 1** quickly to see how it works, use these values:
+### M/M/c Queue Model
 
-- **Sim Time:** `480` (8 hours)
-- **Waiting Station:** 1 server, 1 min service, capacity: `10`
-- **Appetizer:** 2 servers, 2 min service, capacity: `10`
-- **Main Course:** 3 servers, 5 min service, capacity: `15`
-- **Dessert:** 2 servers, 3 min service, capacity: `10`
-- **Dining:** 50 servers (seats), 45 min service (eating time), capacity: `Enter`
-- **Requeue Probability:** `0.4`
-- **Max time requeue:** `90`
+- **First M (Markov):** Interarrival times are exponentially distributed (Poisson arrivals)
+- **Second M (Markov):** Service times are exponentially distributed
+- **c:** Number of parallel servers
+
+### Performance Metrics
+
+- **λ (Lambda):** Arrival rate (customers/minute)
+- **µ (Mu):** Service rate per server (1/mean_service_time)
+- **ρ (Rho):** Server utilization = λ/(c×µ)
+- **L_q:** Average queue length
+- **W_q:** Average waiting time in queue
+- **W:** Average total time in system
+
+### Queueing Behaviors
+
+- **Balking:** Customer leaves immediately if queue is full upon arrival
+- **Reneging:** Customer abandons queue after waiting >20 minutes
+- **Re-queueing:** Customer returns to system after completing service (feedback loop)
+
+---
+
+## 7. Interpreting Results
+
+### Overall Statistics
+
+- **Total customers arrived:** Number of new customer arrivals
+- **Customers completed:** Successfully served customers who exited
+- **Customers still in system:** Currently being processed
+- **Unique customers who completed dining:** Distinct customers (excluding re-queues)
+- **Re-queue events:** Number of times customers returned for more food
+- **Customers who left:** Due to full queue or excessive wait
+
+### Station Metrics
+
+- **Average wait time:** Time spent waiting in queue (lower is better)
+- **Max wait time:** Longest wait experienced
+- **Average service time:** Actual processing time
+- **Average queue length:** Average number waiting (indicator of congestion)
+- **Max queue length:** Peak queue size
+- **Server utilization:** Percentage of time servers are busy
+  - **>90%:** Potential bottleneck, consider adding servers
+  - **<50%:** May be overstaffed
+
+### Event Log
+
+Chronological record of all customer events:
+
+- ARRIVED, ARRIVED_LEFT (balking)
+- ENTER_WAITING, EXIT_WAITING, LEFT (reneging)
+- ENTER_STATION, EXIT_STATION (at each food counter)
+- RETURN_WAITING (unmet demands)
+- REQUEUE (voluntary return for more food)
+- DEPARTED (exit system)
+
+### Station Timeline
+
+Minute-by-minute snapshots showing:
+
+- Queue length at each station
+- Customers in service
+- Total customers served
+
+---
+
+## 8. Troubleshooting
+
+### Common Issues
+
+**Issue:** Kernel dies with "No module named ipykernel_launcher"  
+**Solution:** Install ipykernel: `pip install ipykernel`
+
+**Issue:** "No module named simpy"  
+**Solution:** Install SimPy: `pip install simpy`
+
+**Issue:** Simulation runs but shows all zeros  
+**Solution:** Check that you're running the correct cell (Cell 5 or 6) that includes the `if __name__ == "__main__":` block
+
+**Issue:** Very long execution time  
+**Solution:** Reduce `SIM_TIME` or `ARRIVAL_RATE` for faster testing (if the terminal in vsc don't show all, you can do it in the shell or the system terminal)
+
+---
+
+## 9. Team
+
+| Student             | ID      | Role        |
+| ------------------- | ------- | ----------- |
+| Lê Ngọc An          | 2252007 | Development |
+| Nguyễn Ngọc Duy     | 2252118 | Development |
+| Trương Phú Cường    | 2252100 | Design      |
+| Vũ Trịnh Thanh Bình | 2252085 | Design      |
+| Cao Võ Hoài Phúc    | 2053332 | Evaluation  |
+| Võ Hoàng Long       | 2053192 | Evaluation  |
+
+---
+
+## 10. References
+
+- SimPy Documentation: https://simpy.readthedocs.io
+- Queueing Theory: M/M/c models and performance analysis
+- System Performance Evaluation course materials (CO3007)
+
+---
+
+## Sample Quick Start Configuration
+
+For testing purposes, try these values:
+
+- **Simulation Time:** 60 minutes
+- **Workload:** Use pre-configured WORKLOAD1 or WORKLOAD2
+- **Observe:** Station utilization and queue lengths to identify bottlenecks
+
+### Tips for Analysis
+
+1. **Identify Bottlenecks:** Look for stations with >90% utilization and long queues
+2. **Balance Load:** Adjust number of servers or service times
+3. **Monitor Re-queue Impact:** High re-queue rates significantly increase system load
+4. **Check Customer Loss:** High balking/reneging indicates capacity issues
