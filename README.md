@@ -286,9 +286,14 @@ For testing purposes, try these values:
 - **Workload:** Use pre-configured WORKLOAD1 or WORKLOAD2
 - **Observe:** Station utilization and queue lengths to identify bottlenecks
 
-### Tips for Analysis
+### Analysis
 
-1. **Identify Bottlenecks:** Look for stations with >90% utilization and long queues
+1. **Bottlenecks Simulations:** Look for stations with >90% utilization and long queues
 2. **Balance Load:** Adjust number of servers or service times
 3. **Monitor Re-queue Impact:** High re-queue rates significantly increase system load
 4. **Check Customer Loss:** High balking/reneging indicates capacity issues
+
+### Attention
+
+- **The Simu.py file** act as a backup file (it's include all the cell in the .ipynb file. To run it, you just need to run the command "python Simu.py" at the location where you put the file)
+- To make the result consistent, but still have the system maintain it's randomness, we use a **seed()** in the code
